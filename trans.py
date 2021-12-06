@@ -1,5 +1,6 @@
 ## Direct Linear Transformation with Python
 # implemented after https://me363.byu.edu/sites/me363.byu.edu/files/userfiles/5/DLTNotes.pdf
+# also in reference to https://github.com/SoulTop/Direct_Linear_Transform_DLT
 # functinalities:
 # - estimate transformation from given UVs from two perspective 
 # - calculate 3D point by giving UVs from two perspective and DLT result or Poses
@@ -7,24 +8,12 @@
 
 import numpy as np
 
-def DLT_normalization(x):
+def normalize_vectors(x):
     n = x.shape[1]
     m, s = np.mean(x, 0), np.std(x)
-    if n == 2:
-        T = np.array([
-            [ s,  0,  m[0] ],
-            [ 0,  s,  m[1] ],
-            [ 0,  0,  1    ],
-        ])
-    elif n == 3:
-        T = np.array([
-            [ s,  0,  0,  m[0] ],
-            [ 0,  s,  0,  m[1] ],
-            [ 0,  0,  s,  m[2] ],
-            [ 0,  0,  0,  1    ],
-        ])
-    else:
-        raise ValueError("x.shape[1] must be 2 or 3")
+    T = np.identity(n + 1) * s
+    T[-1, -1] = 1.0
+    T[:-1,-1] = m
 
     T_inv = np.linalg.inv(T)
     x = np.dot(T_inv, np.concatenate((x.T, np.ones((1, x.shape[0])))))
@@ -32,11 +21,11 @@ def DLT_normalization(x):
 
     return T_inv, x
 
-def DLT_calibration(uvs, p3ds):
+def calibration(uvs, p3ds):
     n_points = len(uvs)
 
-    uvsT, uvsN = DLT_normalization(uvs)
-    p3dsT, p3dsN = DLT_normalization(p3ds)
+    uvsT, uvsN = normalize_vectors(uvs)
+    p3dsT, p3dsN = normalize_vectors(p3ds)
 
     g = uvsN.reshape(n_points * 2)
     F = []
@@ -54,7 +43,7 @@ def DLT_calibration(uvs, p3ds):
     H = np.linalg.pinv(uvsT).dot(H).dot(p3dsT)
     H = H * np.divide(1.0, H[-1,-1])
 
-    uvs2 = DLT_project_2d(H.flatten()[:11], p3ds)
+    uvs2 = dlt_project_2d(H.flatten()[:11], p3ds)
 
     MSE = np.mean(np.sum(np.power(uvs - uvs2, 2), axis=1))
     err = np.sqrt(np.mean(np.sum((uvs2 - uvs) ** 2, 1)))
@@ -62,7 +51,7 @@ def DLT_calibration(uvs, p3ds):
     return H.flatten()[:11], MSE, err
 
 # Project 3D points to UV space using DLT components
-def DLT_project_2d(L, p3ds):
+def dlt_project_2d(L, p3ds):
     L = L.flatten()
     # H = | L1  L2  L3  L4  |
     #     | L5  L6  L7  L8  |
@@ -75,7 +64,7 @@ def DLT_project_2d(L, p3ds):
     V = P.dot(H.T)
     return V[:,:2] * np.divide(1.0, V[:,-1,np.newaxis])
 
-def get_DLT_constant(trans, intm):  
+def pcp2dlt(trans, intm):  
     trans = np.array(trans)
     intm = np.array(intm)
 
@@ -101,11 +90,15 @@ def get_DLT_constant(trans, intm):
         R9 / T3,                    # L11 / R11
     ]
 
+def dlt2pcp(L):
+    # TODO: 
+    pass
 
-def solve_DLT(uv_pairs, intm, extm_pair):
+
+def solve(uv_pairs, intm, extm_pair):
     ## get constant
-    L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11 = get_DLT_constant(extm_pair[0], intm)
-    R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11 = get_DLT_constant(extm_pair[1], intm)
+    L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11 = pcp2dlt(extm_pair[0], intm)
+    R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11 = pcp2dlt(extm_pair[1], intm)
 
     p3ds = []
     Ls = np.array(uv_pairs[0])
@@ -141,16 +134,4 @@ p3ds = np.array([[-875, 0, 9.755], [442, 0, 9.755], [1921, 0, 9.755], [2951, 0.5
            [-876, 0, 23.618]])
 uvs = np.array([[76, 706], [702, 706], [1440, 706], [1867, 706], [264, 523], [625, 523]])
 
-L1, MSE, err = DLT_calibration(uvs, p3ds)
-
-from dlt import DLT
-# Known 3D coordinates
-xyz = [[-875, 0, 9.755], [442, 0, 9.755], [1921, 0, 9.755], [2951, 0.5, 9.755], [-4132, 0.5, 23.618],
-           [-876, 0, 23.618]]
-# Known pixel coordinates
-uv = [[76, 706], [702, 706], [1440, 706], [1867, 706], [264, 523], [625, 523]]
-L2, err, uv2 = DLT(xyz, uv)
-
-L1 = np.asarray(L1)
-L2 = np.asarray(L2)[:11]
-print(L1 - L2)
+L1, MSE, err = calibration(uvs, p3ds)
